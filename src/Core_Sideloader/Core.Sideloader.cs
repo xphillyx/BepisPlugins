@@ -13,6 +13,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using UnityEngine;
 using XUnity.ResourceRedirector;
 #if AI
@@ -95,6 +96,37 @@ namespace Sideloader
 
         private static string GetRelativeArchiveDir(string archiveDir) => archiveDir.Length < ModsDirectory.Length ? archiveDir : archiveDir.Substring(ModsDirectory.Length).Trim(' ', '/', '\\');
 
+        private void RunParallel<T>(ICollection<T> data, Action<T> work)
+        {
+            var workerCount = Mathf.Min(3, SystemInfo.processorCount);
+            var perThreadCount = Mathf.CeilToInt(data.Count / (float)workerCount);
+            var doneCount = 0;
+
+            for (var i = 0; i < workerCount; i++)
+            {
+                var workItems = data.Skip(i * perThreadCount).Take(perThreadCount);
+                ThreadingHelper.Instance.StartAsyncInvoke(
+                    () =>
+                    {
+                        try
+                        {
+                            foreach (var workItem in workItems)
+                                work(workItem);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError(ex);
+                        }
+
+                        lock (data) doneCount++;
+                        return null;
+                    });
+            }
+
+            while (doneCount < workerCount)
+                Thread.Sleep(50);
+        }
+
         private void LoadModsFromDirectories(params string[] modDirectories)
         {
             var stopWatch = Stopwatch.StartNew();
@@ -117,7 +149,7 @@ namespace Sideloader
 
             var archives = new Dictionary<ZipFile, Manifest>();
 
-            foreach (var archivePath in allMods)
+            RunParallel(allMods, archivePath =>
             {
                 ZipFile archive = null;
                 try
@@ -127,7 +159,10 @@ namespace Sideloader
                     if (Manifest.TryLoadFromZip(archive, out Manifest manifest))
                     {
                         if (manifest.Game.IsNullOrWhiteSpace() || GameNameList.Contains(manifest.Game.ToLower().Replace("!", "")))
-                            archives.Add(archive, manifest);
+                        {
+                            lock (archives)
+                                archives.Add(archive, manifest);
+                        }
                         else
                             Logger.LogInfo($"Skipping archive \"{GetRelativeArchiveDir(archivePath)}\" because it's meant for {manifest.Game}");
                     }
@@ -137,12 +172,12 @@ namespace Sideloader
                     Logger.LogError($"Failed to load archive \"{GetRelativeArchiveDir(archivePath)}\" with error: {ex}");
                     archive?.Close();
                 }
-            }
+            });
 
             var modLoadInfoSb = new StringBuilder();
 
             // Handle duplicate GUIDs and load unique mods
-            foreach (var modGroup in archives.GroupBy(x => x.Value.GUID))
+            RunParallel(archives.GroupBy(x => x.Value.GUID).ToList(), modGroup =>
             {
                 // Order by version if available, else use modified dates (less reliable)
                 // If versions match, prefer mods inside folders or with more descriptive names so modpacks are preferred
@@ -167,8 +202,11 @@ namespace Sideloader
                 var manifest = orderedMods[0].Value;
                 try
                 {
-                    Archives.Add(archive);
-                    Manifests[manifest.GUID] = manifest;
+                    lock (archives)
+                    {
+                        Archives.Add(archive);
+                        Manifests[manifest.GUID] = manifest;
+                    }
 
                     LoadAllUnityArchives(archive, archive.Name);
                     LoadAllLists(archive, manifest);
@@ -183,13 +221,17 @@ namespace Sideloader
                     var trimmedName = manifest.Name?.Trim();
                     var displayName = !string.IsNullOrEmpty(trimmedName) ? trimmedName : Path.GetFileName(archive.Name);
 
-                    modLoadInfoSb.AppendLine($"Loaded {displayName} {manifest.Version}");
+                    if (ModLoadingLogging.Value)
+                    {
+                        lock (modLoadInfoSb)
+                            modLoadInfoSb.AppendLine($"Loaded {displayName} {manifest.Version}");
+                    }
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError($"Failed to load archive \"{GetRelativeArchiveDir(archive.Name)}\" with error: {ex}");
                 }
-            }
+            });
 
             UniversalAutoResolver.SetResolveInfos(_gatheredResolutionInfos);
             UniversalAutoResolver.SetMigrationInfos(_gatheredMigrationInfos);
@@ -225,7 +267,7 @@ namespace Sideloader
 
                         SetPossessNew(chaListData);
                         UniversalAutoResolver.GenerateResolutionInfo(manifest, chaListData, _gatheredResolutionInfos);
-                        Lists.ExternalDataList.Add(chaListData);
+                        lock (Lists.ExternalDataList) Lists.ExternalDataList.Add(chaListData);
                     }
                     catch (Exception ex)
                     {
@@ -236,7 +278,9 @@ namespace Sideloader
                 else if (entry.Name.StartsWith("abdata/studio/info", StringComparison.OrdinalIgnoreCase) && entry.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
                 {
                     if (Path.GetFileNameWithoutExtension(entry.Name).ToLower().StartsWith("itembonelist_"))
-                        BoneList.Add(entry);
+                    {
+                        lock (BoneList) BoneList.Add(entry);
+                    }
                     else
                     {
                         try
@@ -245,7 +289,7 @@ namespace Sideloader
                             var studioListData = Lists.LoadStudioCSV(stream, entry.Name);
 
                             UniversalAutoResolver.GenerateStudioResolutionInfo(manifest, studioListData);
-                            Lists.ExternalStudioDataList.Add(studioListData);
+                            lock (Lists.ExternalStudioDataList) Lists.ExternalStudioDataList.Add(studioListData);
                         }
                         catch (Exception ex)
                         {
@@ -261,7 +305,7 @@ namespace Sideloader
                         var stream = arc.GetInputStream(entry);
                         MapInfo mapListData = Lists.LoadMapCSV(stream);
 
-                        Lists.ExternalMapList.Add(mapListData);
+                        lock (Lists.ExternalMapList) Lists.ExternalMapList.Add(mapListData);
                     }
                     catch (Exception ex)
                     {
@@ -282,7 +326,7 @@ namespace Sideloader
                     var studioListData = Lists.LoadStudioCSV(stream, entry.Name);
 
                     UniversalAutoResolver.GenerateStudioResolutionInfo(manifest, studioListData);
-                    Lists.ExternalStudioDataList.Add(studioListData);
+                    lock (Lists.ExternalStudioDataList) Lists.ExternalStudioDataList.Add(studioListData);
                 }
                 catch (Exception ex)
                 {
@@ -319,19 +363,25 @@ namespace Sideloader
                     assetBundlePath = assetBundlePath.Remove(0, assetBundlePath.IndexOf('/') + 1); //Remove "abdata/"
 
                     //Make a list of all the .png files and archive they come from
-                    if (PngList.ContainsKey(entry.Name))
+                    lock (PngList)
                     {
-                        if (ModLoadingLogging.Value)
-                            Logger.LogWarning($"Duplicate .png asset detected! {assetBundlePath} in \"{GetRelativeArchiveDir(arc.Name)}\"");
+                        if (PngList.ContainsKey(entry.Name))
+                        {
+                            if (ModLoadingLogging.Value)
+                                Logger.LogWarning($"Duplicate .png asset detected! {assetBundlePath} in \"{GetRelativeArchiveDir(arc.Name)}\"");
+                        }
+                        else
+                            PngList.Add(entry.Name, arc);
                     }
-                    else
-                        PngList.Add(entry.Name, arc);
 
                     assetBundlePath = assetBundlePath.Remove(assetBundlePath.LastIndexOf('/')); //Remove the .png filename
-                    if (!PngFolderList.Contains(assetBundlePath))
+                    lock (PngFolderList)
                     {
-                        //Make a unique list of all folders that contain a .png
-                        PngFolderList.Add(assetBundlePath);
+                        if (!PngFolderList.Contains(assetBundlePath))
+                        {
+                            //Make a unique list of all folders that contain a .png
+                            PngFolderList.Add(assetBundlePath);
+                        }
                     }
                 }
             }

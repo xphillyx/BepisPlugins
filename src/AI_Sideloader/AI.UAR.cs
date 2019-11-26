@@ -35,13 +35,13 @@ namespace Sideloader.AutoResolver
         internal static void GenerateHeadPresetInfo(Manifest manifest, List<HeadPresetInfo> results)
         {
             manifest.LoadHeadPresetInfo();
-            results.AddRange(manifest.HeadPresetList);
+            lock(results) results.AddRange(manifest.HeadPresetList);
         }
 
         internal static void GenerateFaceSkinInfo(Manifest manifest, List<FaceSkinInfo> results)
         {
             manifest.LoadFaceSkinInfo();
-            results.AddRange(manifest.FaceSkinList);
+            lock (results) results.AddRange(manifest.FaceSkinList);
         }
 
         internal static void ResolveFaceSkins()

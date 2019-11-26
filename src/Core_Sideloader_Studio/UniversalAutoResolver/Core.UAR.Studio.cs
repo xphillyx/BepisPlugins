@@ -17,74 +17,77 @@ namespace Sideloader.AutoResolver
 
         internal static void GenerateStudioResolutionInfo(Manifest manifest, Lists.StudioListData data)
         {
-            string StudioListType;
-            if (data.FileNameWithoutExtension.Contains('_'))
-                StudioListType = data.FileNameWithoutExtension.Split('_')[0].ToLower();
-            else
-                return; //Not a studio list
-
-            if (StudioListType == "itembonelist")
+            lock (LoadedStudioResolutionInfo)
             {
-                foreach (List<string> entry in data.Entries)
+                string StudioListType;
+                if (data.FileNameWithoutExtension.Contains('_'))
+                    StudioListType = data.FileNameWithoutExtension.Split('_')[0].ToLower();
+                else
+                    return; //Not a studio list
+
+                if (StudioListType == "itembonelist")
                 {
-                    int slot = int.Parse(entry[0]);
-                    int newSlot;
-
-                    //See if the item this bone info cooresponds to has been resolved and set the ID to the same resolved ID
-                    var item = LoadedStudioResolutionInfo.FirstOrDefault(x => x.ResolveItem && x.GUID == manifest.GUID && x.Slot == slot);
-                    newSlot = item == null ? slot : item.LocalSlot;
-
-                    LoadedStudioResolutionInfo.Add(new StudioResolveInfo
+                    foreach (List<string> entry in data.Entries)
                     {
-                        GUID = manifest.GUID,
-                        Slot = slot,
-                        LocalSlot = newSlot,
-                        ResolveItem = false
-                    });
+                        int slot = int.Parse(entry[0]);
+                        int newSlot;
 
-                    entry[0] = newSlot.ToString();
-                }
-            }
-            else if (Sideloader.StudioListResolveBlacklist.Contains(StudioListType))
-            {
-                foreach (List<string> entry in data.Entries)
-                {
-                    //Add it to the resolution info as is, studio will automatically merge groups with the same IDs without causing exceptions.
-                    //The IDs are expected to stay the same anyway as ItemLists will contain a reference to them.
-                    //Because of this, all ID lookups should check if the thing is a ResolveItem.
-                    LoadedStudioResolutionInfo.Add(new StudioResolveInfo
-                    {
-                        GUID = manifest.GUID,
-                        Slot = int.Parse(entry[0]),
-                        LocalSlot = int.Parse(entry[0]),
-                        ResolveItem = false
-                    });
-                }
-            }
-            else
-            {
-                foreach (List<string> entry in data.Entries)
-                {
-                    int newSlot = Interlocked.Increment(ref CurrentSlotID);
+                        //See if the item this bone info cooresponds to has been resolved and set the ID to the same resolved ID
+                        var item = LoadedStudioResolutionInfo.FirstOrDefault(x => x.ResolveItem && x.GUID == manifest.GUID && x.Slot == slot);
+                        newSlot = item == null ? slot : item.LocalSlot;
 
-                    LoadedStudioResolutionInfo.Add(new StudioResolveInfo
-                    {
-                        GUID = manifest.GUID,
-                        Slot = int.Parse(entry[0]),
-                        LocalSlot = newSlot,
-                        ResolveItem = true
-                    });
+                        LoadedStudioResolutionInfo.Add(new StudioResolveInfo
+                        {
+                            GUID = manifest.GUID,
+                            Slot = slot,
+                            LocalSlot = newSlot,
+                            ResolveItem = false
+                        });
 
-                    if (Sideloader.DebugResolveInfoLogging.Value)
-                    {
-                        Sideloader.Logger.LogInfo($"StudioResolveInfo - " +
-                                                  $"GUID: {manifest.GUID} " +
-                                                  $"Slot: {int.Parse(entry[0])} " +
-                                                  $"LocalSlot: {newSlot} " +
-                                                  $"Count: {LoadedStudioResolutionInfo.Count}");
+                        entry[0] = newSlot.ToString();
                     }
+                }
+                else if (Sideloader.StudioListResolveBlacklist.Contains(StudioListType))
+                {
+                    foreach (List<string> entry in data.Entries)
+                    {
+                        //Add it to the resolution info as is, studio will automatically merge groups with the same IDs without causing exceptions.
+                        //The IDs are expected to stay the same anyway as ItemLists will contain a reference to them.
+                        //Because of this, all ID lookups should check if the thing is a ResolveItem.
+                        LoadedStudioResolutionInfo.Add(new StudioResolveInfo
+                        {
+                            GUID = manifest.GUID,
+                            Slot = int.Parse(entry[0]),
+                            LocalSlot = int.Parse(entry[0]),
+                            ResolveItem = false
+                        });
+                    }
+                }
+                else
+                {
+                    foreach (List<string> entry in data.Entries)
+                    {
+                        int newSlot = Interlocked.Increment(ref CurrentSlotID);
 
-                    entry[0] = newSlot.ToString();
+                        LoadedStudioResolutionInfo.Add(new StudioResolveInfo
+                        {
+                            GUID = manifest.GUID,
+                            Slot = int.Parse(entry[0]),
+                            LocalSlot = newSlot,
+                            ResolveItem = true
+                        });
+
+                        if (Sideloader.DebugResolveInfoLogging.Value)
+                        {
+                            Sideloader.Logger.LogInfo($"StudioResolveInfo - " +
+                                                      $"GUID: {manifest.GUID} " +
+                                                      $"Slot: {int.Parse(entry[0])} " +
+                                                      $"LocalSlot: {newSlot} " +
+                                                      $"Count: {LoadedStudioResolutionInfo.Count}");
+                        }
+
+                        entry[0] = newSlot.ToString();
+                    }
                 }
             }
         }

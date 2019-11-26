@@ -348,19 +348,20 @@ namespace Sideloader.AutoResolver
                                                   $"Count: {LoadedResolutionInfo.Count()}");
                     }
 
-                    results.Add(new ResolveInfo
+                    var resolveInfo = new ResolveInfo
                     {
                         GUID = manifest.GUID,
                         Slot = int.Parse(kv.Value[0]),
                         LocalSlot = newSlot,
                         Property = "Ramp",
                         CategoryNo = category
-                    });
+                    };
+                    lock (results) results.Add(resolveInfo);
                 }
                 else
 #endif
                 {
-                    results.AddRange(propertyKeys.Select(propertyKey =>
+                    var resolveInfos = propertyKeys.Select(propertyKey =>
                     {
                         if (Sideloader.DebugResolveInfoLogging.Value)
                         {
@@ -381,7 +382,8 @@ namespace Sideloader.AutoResolver
                             Property = propertyKey.ToString(),
                             CategoryNo = category
                         };
-                    }));
+                    }).ToList();
+                    lock (results) results.AddRange(resolveInfos);
                 }
 
                 kv.Value[0] = newSlot.ToString();
@@ -391,7 +393,7 @@ namespace Sideloader.AutoResolver
         internal static void GenerateMigrationInfo(Manifest manifest, List<MigrationInfo> results)
         {
             manifest.LoadMigrationInfo();
-            results.AddRange(manifest.MigrationList);
+            lock(results) results.AddRange(manifest.MigrationList);
         }
 
         internal static void ShowGUIDError(string guid)

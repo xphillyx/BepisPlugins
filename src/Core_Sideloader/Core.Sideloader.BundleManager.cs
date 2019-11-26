@@ -43,16 +43,19 @@ namespace Sideloader
         {
             warning = "";
 
-            if (Bundles.TryGetValue(path, out var lazyList))
+            lock (Bundles)
             {
-                warning = $"Duplicate asset bundle detected! {path}";
-                lazyList.Add(LazyCustom<AssetBundle>.Create(func));
-            }
-            else
-                Bundles.Add(path, new List<LazyCustom<AssetBundle>>
+                if (Bundles.TryGetValue(path, out var lazyList))
+                {
+                    warning = $"Duplicate asset bundle detected! {path}";
+                    lazyList.Add(LazyCustom<AssetBundle>.Create(func));
+                }
+                else
+                    Bundles.Add(path, new List<LazyCustom<AssetBundle>>
                 {
                     LazyCustom<AssetBundle>.Create(func)
                 });
+            }
         }
 
         internal static bool TryGetObjectFromName<T>(string name, string assetBundle, out T obj) where T : UnityEngine.Object
